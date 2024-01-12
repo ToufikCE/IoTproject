@@ -1,0 +1,95 @@
+#include <WiFi.h>
+#include <ArduinoMqttClient.h>
+ 
+char ssid[] = "IoTatelierF2122";    // 22 tot 44 
+char pass[] = "IoTatelier";
+WiFiClient wifiClient;
+MqttClient mqttClient(wifiClient);
+const char broker[] = "192.168.122.1";
+const int port = 1883;
+const char publishTopic[] = "Toufik/plantvochtigheid"; 
+const char subscribeTopic[] = "mariekristkoiz/light"; 
+long count = 0;
+const long interval = 1000;   //analog read interval
+unsigned long previousMillis = 0;
+
+#define AOUT_PIN 15 // ESP32 pin D15 dat verbind met de AOUT pin van de vochtigheidssensor 
+#define GROENE_LED_PIN 19 // Groene LED pin
+#define RODE_LED_PIN 18 // Rode LED pin
+
+void connecttoMQTT(){
+    Serial.println("Wifi connecting");
+  WiFi.useStaticBuffers(true);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, pass);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+    Serial.println("MQTT connecting");
+    bool MQTTconnected = false;
+       while (!MQTTconnected) {
+      if (!mqttClient.connect(broker, port))
+        delay(1000);
+      else
+        MQTTconnected = true;
+    }
+    mqttClient.onMessage(onMqttMessage);
+    mqttClient.subscribe(subscribeTopic);
+    Serial.println("Setup complete");
+}
+// MQTT voor de loop
+void sendMessagetoMQTT(){
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= interval) {
+      previousMillis = currentMillis;
+      int value = analogRead(AOUT_PIN);
+      Serial.print("Sending message to topic: ");
+      Serial.println(publishTopic);
+      Serial.print(value);
+      mqttClient.beginMessage(publishTopic,true,0);
+      mqttClient.print(value);
+      mqttClient.endMessage();
+  }
+  delay(1);
+}
+// ontvang bericht naar MQTT
+void onMqttMessage(int messageSize) {
+  Serial.print("Received a message with topic '");
+  Serial.println(mqttClient.messageTopic());
+ 
+  String message = "";
+  while (mqttClient.available()) {
+    message.concat((char)mqttClient.read());
+  }
+  Serial.println(message);
+ 
+}
+void setup() {
+  pinMode(GROENE_LED_PIN, OUTPUT);
+  pinMode(RODE_LED_PIN, OUTPUT);
+  Serial.begin(9600);
+  connecttoMQTT();
+}
+
+void loop() {
+  int value = analogRead(AOUT_PIN); // lees de analoge waarde van de sensor
+  mqttClient.poll();
+  sendMessagetoMQTT();
+   
+
+  Serial.print("Vochtigheidswaarde: ");
+  Serial.println(value);
+
+  if (value > 500) {
+    digitalWrite(GROENE_LED_PIN, HIGH); // Groene LED aan
+    digitalWrite(RODE_LED_PIN, LOW); // Rode LED uit
+    Serial.println("Grond is vochtig");
+  } else {
+    digitalWrite(GROENE_LED_PIN, LOW); // Groene LED uit
+    digitalWrite(RODE_LED_PIN, HIGH); // Rode LED aan
+    Serial.println("Grond is droog");
+  }
+
+  delay(500); // Wacht 0.5 seconde voordat de sensor opnieuw uitleest
+}
